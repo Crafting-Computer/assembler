@@ -97,7 +97,7 @@ aInstruction =
       (int ExpectingInt InvalidNumber)
   ) |> andThen
     (\number ->
-      if number >= 2 ^ 32 then
+      if number >= 2 ^ 31 then
         problem NumberTooLarge
       else
         succeed <| AInstruction <| AInstructionNumber number
@@ -310,7 +310,7 @@ showProblem p =
       "a decimal integer"
     
     NumberTooLarge ->
-      "a number smaller than 4294967296 (2^32)"
+      "a number smaller than 2147483648 (2^31)"
 
     ExpectingDestinations str ->
       str
