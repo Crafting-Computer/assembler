@@ -1,4 +1,4 @@
-module AsmEmitter exposing (..)
+module AsmEmitter exposing (emit)
 
 
 import AsmParser exposing (Instruction(..), AInstructionArg(..),Destinations, Jump)
@@ -27,9 +27,10 @@ emitInstruction instruction =
           label
         
     CInstruction { destinations, computation, jump } ->
-      emitDestinations destinations
-      ++ emitComputation computation
-      ++ emitJump jump
+      String.padLeft 32 '1' <|
+        emitComputation computation
+        ++ emitDestinations destinations
+        ++ emitJump jump
 
 
 emitDestinations : Destinations -> String
