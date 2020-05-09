@@ -1,4 +1,4 @@
-module AsmParser exposing (parse, showDeadEnds)
+module AsmParser exposing (parse, showDeadEnds, Instruction(..), AInstructionArg(..), Destinations, Jump)
 
 
 import Parser.Advanced exposing (..)
@@ -6,7 +6,7 @@ import List.Extra
 
 
 type Instruction
-  = AInstruction AArg
+  = AInstruction AInstructionArg
   | CInstruction
     { destinations : Destinations
     , computation : String
@@ -14,15 +14,15 @@ type Instruction
     }
 
 
-type AArg
-  = ANumber Int
-  | ALabel String
+type AInstructionArg
+  = AInstructionNumber Int
+  | AInstructionLabel String
 
 
 type alias Destinations =
   { a : Bool
-  , m : Bool
   , d : Bool
+  , m : Bool
   }
 
 type alias Jump =
@@ -100,7 +100,7 @@ aInstruction =
       if number >= 2 ^ 32 then
         problem NumberTooLarge
       else
-        succeed <| AInstruction <| ANumber number
+        succeed <| AInstruction <| AInstructionNumber number
     )
 
 
@@ -117,7 +117,7 @@ cInstruction =
         jmp
       }
     )
-    |= ( optional { a = False, m = False, d = False } <|
+    |= ( optional { a = False, d = False, m = False } <|
       succeed identity
       |= destinations
       |. symbol (Token "=" ExpectingEqualSign)
@@ -138,8 +138,8 @@ destinations =
       let
         dest =
           { a = String.contains "A" str
-          , m = String.contains "M" str
           , d = String.contains "D" str
+          , m = String.contains "M" str
           }
       in
       map (\_ -> dest) <| keyword <| Token str (ExpectingDestinations str)
