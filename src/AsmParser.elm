@@ -1,12 +1,14 @@
-module AsmParser exposing (parse, showDeadEnds, Instruction(..), AInstructionArg(..), Destinations, Jump)
+module AsmParser exposing (parse, showDeadEnds, Instruction(..), Destinations, Jump)
 
 
 import Parser.Advanced exposing (..)
 import List.Extra
+import Set exposing (Set)
+import Dict exposing (Dict)
 
 
 type Instruction
-  = AInstruction AInstructionArg
+  = AInstruction Int
   | CInstruction
     { destinations : Destinations
     , computation : String
@@ -14,9 +16,19 @@ type Instruction
     }
 
 
-type AInstructionArg
-  = AInstructionNumber Int
-  | AInstructionLabel String
+type ParserInstruction
+  = ParserAInstruction ParserAInstructionArg
+  | ParserCInstruction
+    { destinations : Destinations
+    , computation : String
+    , jump : Jump
+    }
+  | ParserLabelInstruction (Located String) Int
+
+
+type ParserAInstructionArg
+  = ParserAInstructionNumber Int
+  | ParserAInstructionLabel (Located String)
 
 
 type alias Destinations =
@@ -35,47 +47,194 @@ type alias Jump =
 type Context
   = AContext
   | CContext
+  | LabelContext
 
 
 type Problem
   = ExpectingAtSign
   | ExpectingEqualSign
   | ExpectingSemicolonSign
+  | ExpectingLeftParenSign
+  | ExpectingRightParenSign
   | ExpectingStartOfLineComment
   | ExpectingEOF
   | ExpectingInstruction
   | ExpectingInt
-  | InvalidNumber
-  | NumberTooLarge
   | ExpectingDestinations String
   | ExpectingComputation
   | ExpectingJump String
+  | ExpectingLabel
+  | ExpectingCustomLabel
+  | InvalidNumber
+  | NumberTooLarge Int
+  | UndefinedSymbol String
 
 
 type alias AsmParser a =
   Parser Context Problem a
 
 
+type alias SymbolTable =
+  Dict String Int
+
+
+predefinedSymbolTable : SymbolTable
+predefinedSymbolTable =
+  Dict.fromList
+    [ ("R0", 0)
+    , ("R1", 1)
+    , ("R2", 2)
+    , ("R3", 3)
+    , ("R4", 4)
+    , ("R5", 5)
+    , ("R6", 6)
+    , ("R7", 7)
+    , ("R8", 8)
+    , ("R9", 9)
+    , ("R10", 10)
+    , ("R11", 11)
+    , ("R12", 12)
+    , ("R13", 13)
+    , ("R14", 14)
+    , ("R15", 15)
+    , ("SCREEN", 2 ^ 20)
+    , ("KBD", 2 ^ 20 + 2 ^ 19)
+    , ("SP", 0)
+    , ("LCL", 1)
+    , ("ARG", 2)
+    ]
+
+
+predefinedLabels : Set String
+predefinedLabels =
+  Set.fromList <|
+    Dict.keys predefinedSymbolTable
+
+
 parse : String -> Result (List (DeadEnd Context Problem)) (List Instruction)
 parse src =
-  run (succeed identity |= instructions |. end ExpectingEOF) src
+  run
+    ( succeed identity
+      |= instructions
+      |. end ExpectingEOF
+    )
+    src
+  |> Result.andThen
+  (\ast ->
+    let
+      declaredSymbolTable : SymbolTable
+      declaredSymbolTable =
+        List.foldl
+          (\instruction names ->
+            case instruction of
+              ParserLabelInstruction name number ->
+                Dict.insert name.value number names
+              
+              _ ->
+                names
+          )
+          Dict.empty
+          ast
+
+      declaredSymbols : Set String
+      declaredSymbols =
+        Set.union predefinedLabels (Set.fromList <| Dict.keys declaredSymbolTable)
+      
+      undefinedSymbols : List (Located String)
+      undefinedSymbols =
+        List.foldl
+          (\instruction names ->
+            case instruction of
+              ParserAInstruction arg ->
+                case arg of
+                  ParserAInstructionLabel name ->
+                    if Set.member name.value declaredSymbols || (isLowerCase <| String.slice 0 1 name.value) then
+                      names
+                    else
+                      name :: names
+                  
+                  _ ->
+                    names
+
+              _ ->
+                names
+          )
+          []
+          ast
+    in
+    case undefinedSymbols of
+      [] ->
+        let
+          substitutedAst =
+            List.reverse <|
+            List.foldl
+              (\instruction nextAst ->
+                case instruction of
+                  ParserAInstruction arg ->
+                    case arg of
+                      ParserAInstructionLabel name ->
+                        case Dict.get name.value declaredSymbolTable of
+                          Nothing ->
+                            nextAst
+                          
+                          Just number ->
+                            AInstruction number :: nextAst
+                      
+                      ParserAInstructionNumber number ->
+                        AInstruction number :: nextAst
+                      
+                  ParserCInstruction record ->
+                    CInstruction record :: nextAst
+                  
+                  ParserLabelInstruction _ _ ->
+                    nextAst
+              )
+              []
+              ast
+        in
+        Ok substitutedAst
+
+      _ ->
+        Err <|
+        List.map
+          (\symbol ->
+            { row = Tuple.first symbol.from
+            , col = Tuple.second symbol.from
+            , problem = UndefinedSymbol symbol.value
+            , contextStack = []
+            }
+          )
+          undefinedSymbols
+  )
 
 
-instructions : AsmParser (List Instruction)
+instructions : AsmParser (List ParserInstruction)
 instructions =
-  ( succeed (\start ins end -> (start, ins, end))
+  ( succeed (\start (_, ins) end -> (start, ins, end))
     |= getOffset
-    |= ( loop [] <| \revDefs ->
+    |= ( loop (0, []) <| \(instructionIndex, revInstructions) ->
       oneOf
-      [ succeed (\d -> Loop (d :: revDefs))
+      [ succeed
+        (\instruction ->
+          Loop
+          ( case instruction of
+            ParserLabelInstruction _ _ ->
+              instructionIndex
+            
+            _ ->
+              instructionIndex + 1
+          , instruction :: revInstructions
+          )
+        )
         |. sps
         |= oneOf
           [ aInstruction
-          , cInstruction      
+          , labelInstruction instructionIndex
+          , cInstruction
           ]
         |. sps
       , succeed ()
-        |> map (\_ -> Done (List.reverse revDefs))
+        |> map (\_ -> Done (instructionIndex, List.reverse revInstructions))
       ]
     )
     |= getOffset
@@ -89,26 +248,35 @@ instructions =
     )
 
 
-aInstruction : AsmParser Instruction
+aInstruction : AsmParser ParserInstruction
 aInstruction =
   ( succeed identity
     |. symbol (Token "@" ExpectingAtSign)
-    |= inContext AContext
-      (int ExpectingInt InvalidNumber)
+    |= (inContext AContext <|
+      oneOf
+        [ map ParserAInstructionLabel <| usedLabel
+        , map ParserAInstructionNumber <| int ExpectingInt InvalidNumber
+        ]
+    )
   ) |> andThen
-    (\number ->
-      if number >= 2 ^ 31 then
-        problem NumberTooLarge
-      else
-        succeed <| AInstruction <| AInstructionNumber number
+    (\arg ->
+      case arg of
+        ParserAInstructionNumber number ->
+          if number >= 2 ^ 31 then
+            problem <| NumberTooLarge number
+          else
+            succeed <| ParserAInstruction <| ParserAInstructionNumber number
+        
+        ParserAInstructionLabel name ->
+          succeed <| ParserAInstruction <| ParserAInstructionLabel name
     )
 
 
-cInstruction : AsmParser Instruction
+cInstruction : AsmParser ParserInstruction
 cInstruction =
   inContext CContext <|
   succeed (\dest comp jmp ->
-    CInstruction
+    ParserCInstruction
       { destinations =
         dest
       , computation =
@@ -235,6 +403,49 @@ jump =
     ]
 
 
+labelInstruction : Int -> AsmParser ParserInstruction
+labelInstruction instructionIndex =
+  succeed identity
+  |. symbol (Token "(" ExpectingLeftParenSign)
+  |= ( inContext LabelContext <|
+    succeed (\name ->
+      ParserLabelInstruction name instructionIndex
+    )
+      |= declaredLabel
+      |. symbol (Token ")" ExpectingRightParenSign)
+  )
+
+
+declaredLabel : AsmParser (Located String)
+declaredLabel =
+  located <|
+  variable
+    { expecting =
+      ExpectingCustomLabel
+    , start =
+      Char.isAlpha
+    , inner =
+      \c -> Char.isAlphaNum c || c == '_'
+    , reserved =
+      predefinedLabels
+    }
+
+
+usedLabel : AsmParser (Located String)
+usedLabel =
+  located <|
+  variable
+    { expecting =
+      ExpectingLabel
+    , start =
+      Char.isAlpha
+    , inner =
+      \c -> Char.isAlphaNum c || c == '_'
+    , reserved =
+      Set.empty
+    }
+
+
 sps : AsmParser ()
 sps =
   loop 0 <| ifProgress <|
@@ -255,32 +466,46 @@ ifProgress parser offset =
 optional : a -> AsmParser a -> AsmParser a
 optional default parser =
   oneOf
-    [ parser
+    [ backtrackable parser
     , succeed default
     ]
 
 
-showDeadEnds : String -> List (DeadEnd Context Problem) -> String
-showDeadEnds src deadEnds =
+showDeadEnds : Maybe Int -> String -> List (DeadEnd Context Problem) -> String
+showDeadEnds lineNumber src deadEnds =
   let
     deadEndGroups =
       List.Extra.groupWhile (\d1 d2 -> d1.row == d2.row && d1.col == d2.col) <| deadEnds
   in
-  String.join "\n" <| List.map (showDeadEndsHelper src) deadEndGroups
+  String.join "\n" <| List.map (showDeadEndsHelper lineNumber src) deadEndGroups
 
 
-showDeadEndsHelper : String -> ((DeadEnd Context Problem), List (DeadEnd Context Problem)) -> String
-showDeadEndsHelper src (first, rests) =
+showDeadEndsHelper : Maybe Int -> String -> ((DeadEnd Context Problem), List (DeadEnd Context Problem)) -> String
+showDeadEndsHelper lineNumber src (first, rests) =
   let
     location =
-      showProblemLocation first.row first.col src
-    problems =
-      List.map (.problem >> showProblem) <| List.reverse <| first :: rests
+      showProblemLocation lineNumber first.row first.col src
     context =
       showProblemContextStack first.contextStack
   in
   location ++ "\n"
-  ++ "I'm expecting " ++ String.join " or " problems
+  ++ (case first.problem of
+    InvalidNumber ->
+      "I found an invalid number. I'm expecting a decimal integer"
+    
+    NumberTooLarge number ->
+      "I found a number `" ++ String.fromInt number ++ "` that's too large. All numbers should be less than 2147483648 (2^31)"
+
+    UndefinedSymbol symbol ->
+      "I found an undefined symbol `" ++ symbol ++ "`. You should declare it as a label somewhere like so: `(" ++ symbol ++ ")`"
+    
+    _ ->
+      let
+        problemStrs =
+          List.map (.problem >> showProblem) <| List.reverse <| first :: rests
+      in
+      "I'm expecting " ++ String.join " or " problemStrs
+  )
   ++ (if String.isEmpty context then "" else " in the " ++ context)
   ++ "."
 
@@ -296,6 +521,12 @@ showProblem p =
     
     ExpectingSemicolonSign ->
       "a ';'"
+
+    ExpectingLeftParenSign ->
+      "a '('"
+    
+    ExpectingRightParenSign ->
+      "a ')'"
     
     ExpectingEOF ->
       "the end of program"
@@ -305,12 +536,6 @@ showProblem p =
 
     ExpectingInt ->
       "an integer"
-
-    InvalidNumber ->
-      "a decimal integer"
-    
-    NumberTooLarge ->
-      "a number smaller than 2147483648 (2^31)"
 
     ExpectingDestinations str ->
       str
@@ -323,6 +548,21 @@ showProblem p =
 
     ExpectingStartOfLineComment ->
       "the start of comment '//'"
+
+    ExpectingLabel ->
+      "a label"
+
+    ExpectingCustomLabel ->
+      "a custom label"
+
+    InvalidNumber ->
+      "a valid decimal integer"
+    
+    NumberTooLarge _ ->
+      "an integer less than 2147483648 (2^31)."
+
+    UndefinedSymbol _ ->
+      "a defined symbol"
 
 
 showProblemContextStack : List { row : Int, col : Int, context : Context } -> String
@@ -339,21 +579,26 @@ showProblemContext context =
     CContext ->
       "C instruction"
 
+    LabelContext ->
+      "label declaration"
 
-showProblemLocation : Int -> Int -> String -> String
-showProblemLocation row col src =
-  let
-    _ = Debug.log "AL -> row" <| row
-    _ = Debug.log "AL -> col" <| col
-  in
+
+showProblemLocation : Maybe Int -> Int -> Int -> String -> String
+showProblemLocation customLineNumber row col src =
   let
     rawLine =
       getLine row src
+    lineNumber =
+      case customLineNumber of
+        Nothing ->
+          row
+        
+        Just number ->
+          number
     line =
-      String.fromInt row ++ "| " ++ (String.trimLeft <| rawLine)
+      String.fromInt lineNumber ++ "| " ++ (String.trimLeft <| rawLine)
     offset =
       String.length line - String.length rawLine - 1
-    _ = Debug.log "AL -> offsettedCol" <| offsettedCol
     offsettedCol =
       offset + col
     underline =
@@ -382,3 +627,22 @@ getLine row src =
   Maybe.withDefault ("CAN'T GET LINE AT ROW " ++ String.fromInt row) -- impossible
     <| List.Extra.getAt (row - 1) <| String.split "\n" src
 
+
+type alias Located a =
+  { from : (Int, Int)
+  , value : a
+  , to : (Int, Int)
+  }
+
+
+located : AsmParser a -> AsmParser (Located a)
+located parser =
+  succeed Located
+    |= getPosition
+    |= parser
+    |= getPosition
+
+
+isLowerCase : String -> Bool
+isLowerCase str =
+  String.toLower str == str

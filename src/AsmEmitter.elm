@@ -1,7 +1,7 @@
 module AsmEmitter exposing (emit)
 
 
-import AsmParser exposing (Instruction(..), AInstructionArg(..),Destinations, Jump)
+import AsmParser exposing (Instruction(..), Destinations, Jump)
 import Binary
 
 
@@ -16,15 +16,10 @@ emit instructions =
 emitInstruction : Instruction -> String
 emitInstruction instruction =
   case instruction of
-    AInstruction arg ->
-      case arg of
-        AInstructionNumber number ->
-          String.join ""  <|
-          List.map String.fromInt <|
-          Binary.toIntegers <| Binary.ensureSize 32 <| Binary.fromDecimal number
-        
-        AInstructionLabel label ->
-          label
+    AInstruction number ->
+      String.join ""  <|
+      List.map String.fromInt <|
+      Binary.toIntegers <| Binary.ensureSize 32 <| Binary.fromDecimal number
         
     CInstruction { destinations, computation, jump } ->
       String.padLeft 32 '1' <|
