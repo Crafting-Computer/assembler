@@ -65,6 +65,7 @@ type Problem
   | ExpectingJump String
   | ExpectingLabel
   | ExpectingCustomLabel
+  | ExpectingVariableName
   | InvalidNumber
   | NumberTooLarge Int
   | UndefinedSymbol String
@@ -120,22 +121,8 @@ parse src =
     )
     src
   |> Result.andThen
-  (\ast ->
+  (\(ast, declaredSymbolTable) ->
     let
-      declaredSymbolTable : SymbolTable
-      declaredSymbolTable =
-        List.foldl
-          (\instruction names ->
-            case instruction of
-              ParserLabelInstruction name number ->
-                Dict.insert name.value number names
-              
-              _ ->
-                names
-          )
-          Dict.empty
-          ast
-
       declaredSymbols : Set String
       declaredSymbols =
         Set.union predefinedLabels (Set.fromList <| Dict.keys declaredSymbolTable)
@@ -148,7 +135,7 @@ parse src =
               ParserAInstruction arg ->
                 case arg of
                   ParserAInstructionLabel name ->
-                    if Set.member name.value declaredSymbols || (isLowerCase <| String.slice 0 1 name.value) then
+                    if Set.member name.value declaredSymbols then
                       names
                     else
                       name :: names
@@ -161,6 +148,9 @@ parse src =
           )
           []
           ast
+
+      symbolTable =
+        Dict.union declaredSymbolTable predefinedSymbolTable
     in
     case undefinedSymbols of
       [] ->
@@ -173,7 +163,7 @@ parse src =
                   ParserAInstruction arg ->
                     case arg of
                       ParserAInstructionLabel name ->
-                        case Dict.get name.value declaredSymbolTable of
+                        case Dict.get name.value symbolTable of
                           Nothing ->
                             nextAst
                           
@@ -208,22 +198,67 @@ parse src =
   )
 
 
-instructions : AsmParser (List ParserInstruction)
+instructions : AsmParser (List ParserInstruction, SymbolTable)
 instructions =
-  ( succeed (\start (_, ins) end -> (start, ins, end))
+  let
+    initialState =
+      { instructionIndex =
+        0
+      , variableIndex =
+        16
+      , symbolTable =
+        Dict.empty
+      }
+  in
+  ( succeed (\start (ins, state) end -> (start, (ins, state.symbolTable), end))
     |= getOffset
-    |= ( loop (0, []) <| \(instructionIndex, revInstructions) ->
+    |= ( loop ([], initialState) <| \(revInstructions, {instructionIndex, variableIndex, symbolTable} as state) ->
       oneOf
       [ succeed
         (\instruction ->
           Loop
-          ( case instruction of
-            ParserLabelInstruction _ _ ->
-              instructionIndex
-            
-            _ ->
-              instructionIndex + 1
-          , instruction :: revInstructions
+          ( instruction :: revInstructions
+          , { instructionIndex =
+              case instruction of
+                ParserLabelInstruction _ _ ->
+                  instructionIndex
+                
+                _ ->
+                  instructionIndex + 1
+            , variableIndex =
+              case instruction of
+                ParserAInstruction arg ->
+                  case arg of
+                    ParserAInstructionLabel name ->
+                      if isVariableName name.value then
+                        variableIndex + 1
+                      else
+                        variableIndex
+
+                    ParserAInstructionNumber _ ->
+                      variableIndex
+                
+                _ ->
+                  variableIndex
+            , symbolTable =
+              case instruction of
+                ParserLabelInstruction name number ->
+                  Dict.insert name.value number symbolTable
+                
+                ParserAInstruction arg ->
+                  case arg of
+                    ParserAInstructionLabel name ->
+                      if isVariableName name.value && (not <| Dict.member name.value symbolTable) then
+                        Dict.insert name.value variableIndex symbolTable
+                      else
+                        symbolTable
+
+                    ParserAInstructionNumber _ ->
+                      symbolTable
+                
+                _ ->
+                  symbolTable
+            }
           )
         )
         |. sps
@@ -234,7 +269,7 @@ instructions =
           ]
         |. sps
       , succeed ()
-        |> map (\_ -> Done (instructionIndex, List.reverse revInstructions))
+        |> map (\_ -> Done (List.reverse revInstructions, state))
       ]
     )
     |= getOffset
@@ -254,7 +289,11 @@ aInstruction =
     |. symbol (Token "@" ExpectingAtSign)
     |= (inContext AContext <|
       oneOf
-        [ map ParserAInstructionLabel <| usedLabel
+        [ map ParserAInstructionLabel <|
+          oneOf
+            [ usedLabel
+            , variableName
+            ]
         , map ParserAInstructionNumber <| int ExpectingInt InvalidNumber
         ]
     )
@@ -416,6 +455,21 @@ labelInstruction instructionIndex =
   )
 
 
+variableName : AsmParser (Located String)
+variableName =
+  located <|
+  variable
+    { expecting =
+      ExpectingVariableName
+    , start =
+      Char.isAlpha
+    , inner =
+      \c -> Char.isAlphaNum c && (not <| Char.isUpper c) || c == '_'
+    , reserved =
+      Set.empty
+    }
+
+
 declaredLabel : AsmParser (Located String)
 declaredLabel =
   located <|
@@ -425,7 +479,7 @@ declaredLabel =
     , start =
       Char.isAlpha
     , inner =
-      \c -> Char.isAlphaNum c || c == '_'
+      \c -> Char.isAlphaNum c && (not <| Char.isLower c) || c == '_'
     , reserved =
       predefinedLabels
     }
@@ -440,7 +494,7 @@ usedLabel =
     , start =
       Char.isAlpha
     , inner =
-      \c -> Char.isAlphaNum c || c == '_'
+      \c -> Char.isAlphaNum c && (not <| Char.isLower c) || c == '_'
     , reserved =
       Set.empty
     }
@@ -550,10 +604,13 @@ showProblem p =
       "the start of comment '//'"
 
     ExpectingLabel ->
-      "a label"
+      "a label in all caps like `R0`"
 
     ExpectingCustomLabel ->
-      "a custom label"
+      "a custom label in all caps like `LOOP_0`"
+
+    ExpectingVariableName ->
+      "a variable name in all lowercase like `my_variable_0`"
 
     InvalidNumber ->
       "a valid decimal integer"
@@ -643,6 +700,11 @@ located parser =
     |= getPosition
 
 
-isLowerCase : String -> Bool
-isLowerCase str =
-  String.toLower str == str
+isVariableName : String -> Bool
+isVariableName name =
+  case String.uncons name of
+    Nothing ->
+      False
+    
+    Just (firstChar, _) ->
+      Char.isLower firstChar
