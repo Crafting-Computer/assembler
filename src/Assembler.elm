@@ -1,11 +1,11 @@
-module Assembler exposing (main, assembleInstruction, assembleProgram)
+module Assembler exposing (main, assembleInstruction, assembleProgram, parseProgram, instructionToString)
 
 import Html exposing (div, p, pre, text)
-import AsmParser exposing (parse, showDeadEnds)
+import AsmParser exposing (parse, showDeadEnds, Instruction(..), Destinations, Jump)
 import AsmEmitter exposing (emit)
 
 
-add =
+testAdd =
   """-- This file is part of www.nand2tetris.org
 -- and the book "The Elements of Computing Systems"
 -- by Nisan and Schocken, MIT Press.
@@ -24,7 +24,7 @@ M=D -- set R0 to 2 + 3
   """
 
 
-jump =
+testJump =
   """-- This file is part of www.nand2tetris.org
 -- and the book "The Elements of Computing Systems"
 -- by Nisan and Schocken, MIT Press.
@@ -43,7 +43,7 @@ M=D -- set R0 to 2 + 3
   """
 
 
-multiplication =
+testMult =
   """{- This file is part of www.nand2tetris.org
   and the book "The Elements of Computing Systems"
   by Nisan and Schocken, MIT Press.
@@ -82,7 +82,7 @@ M=1
   """
 
 
-errorSubtractBy2 =
+testErrorSubtractBy2 =
   """-- This file is part of www.nand2tetris.org
 -- and the book "The Elements of Computing Systems"
 -- by Nisan and Schocken, MIT Press.
@@ -101,7 +101,7 @@ M=D
 
 
 source =
-  multiplication
+  testMult
 
 
 assembleInstruction : Int -> String -> Result String String
@@ -112,6 +112,80 @@ assembleInstruction lineNumber instruction =
     
     Ok ast ->
       Ok <| emit ast
+
+
+parseProgram : String -> Result ((Int, Int), String) (List Instruction)
+parseProgram program =
+  case parse program of
+    Err deadEnds ->
+      case deadEnds of
+        [] ->
+          Err ((0, 0), "") -- impossible
+        
+        firstDeadEnd :: _ ->
+          Err ((firstDeadEnd.row, firstDeadEnd.col), showDeadEnds Nothing program deadEnds)
+    
+    Ok ast ->
+      Ok ast
+
+
+instructionToString : Instruction -> String
+instructionToString instruction =
+  case instruction of
+    AInstruction number ->
+      "@" ++ String.fromInt number
+    
+    CInstruction { destinations, computation, jump } ->
+      ( case destinationsToString destinations of
+        "" ->
+          ""
+        
+        str ->
+          str ++ "="
+      )
+      ++ computation
+      ++ ( case jumpToString jump of
+        "" ->
+          ""
+        
+        str ->
+          ";" ++ str
+      )
+
+
+destinationsToString : Destinations -> String
+destinationsToString { a, m, d } =
+  (if a then "A" else "")
+  ++ (if m then "M" else "")
+  ++ (if d then "D" else "")
+
+
+jumpToString : Jump -> String
+jumpToString { lt, eq, gt } =
+  case ( lt, eq, gt ) of
+    (False, False, False) ->
+      ""
+    
+    (False, False, True) ->
+      "JGT"
+    
+    (False, True, False) ->
+      "JEQ"
+    
+    (False, True, True) ->
+      "JGE"
+    
+    (True, False, False) ->
+      "JLT"
+
+    (True, False, True) ->
+      "JNE"
+
+    (True, True, False) ->
+      "JLE"
+    
+    (True, True, True) ->
+      "JMP"
 
 
 assembleProgram : String -> Result String String
