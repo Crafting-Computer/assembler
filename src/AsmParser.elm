@@ -5,6 +5,7 @@ import Parser.Advanced exposing (..)
 import List.Extra
 import Set exposing (Set)
 import Dict exposing (Dict)
+import EverySet
 
 
 type Instruction
@@ -57,6 +58,8 @@ type Problem
   | ExpectingLeftParenSign
   | ExpectingRightParenSign
   | ExpectingStartOfLineComment
+  | ExpectingStartOfMultiLineComment
+  | ExpectingEndOfMultiLineComment
   | ExpectingEOF
   | ExpectingInstruction
   | ExpectingInt
@@ -120,6 +123,10 @@ parse src =
       |. end ExpectingEOF
     )
     src
+  |> Result.mapError
+  (\deadEnds ->
+    List.reverse <| EverySet.toList <| EverySet.fromList <| deadEnds
+  )
   |> Result.andThen
   (\(ast, declaredSymbolTable) ->
     let
@@ -504,7 +511,8 @@ sps : AsmParser ()
 sps =
   loop 0 <| ifProgress <|
     oneOf
-      [ succeed () |. symbol (Token "//" ExpectingStartOfLineComment) |. chompWhile (\c -> c /= '\n')
+      [ succeed () |. symbol (Token "--" ExpectingStartOfLineComment) |. chompWhile (\c -> c /= '\n')
+      , multiComment (Token "{-" ExpectingStartOfMultiLineComment) (Token "-}" ExpectingEndOfMultiLineComment) Nestable
       , spaces
       ]
 
@@ -601,7 +609,13 @@ showProblem p =
       str
 
     ExpectingStartOfLineComment ->
-      "the start of comment '//'"
+      "the start of a single-line comment '--'"
+    
+    ExpectingStartOfMultiLineComment ->
+      "the start of a multi-line comment '{-'"
+    
+    ExpectingEndOfMultiLineComment ->
+      "the end of a multi-line comment '-}'"
 
     ExpectingLabel ->
       "a label in all caps like `R0`"
