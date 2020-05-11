@@ -469,7 +469,7 @@ variableName =
     { expecting =
       ExpectingVariableName
     , start =
-      Char.isAlpha
+      Char.isLower
     , inner =
       \c -> Char.isAlphaNum c && (not <| Char.isUpper c) || c == '_'
     , reserved =
@@ -499,7 +499,7 @@ usedLabel =
     { expecting =
       ExpectingLabel
     , start =
-      Char.isAlpha
+      Char.isUpper
     , inner =
       \c -> Char.isAlphaNum c && (not <| Char.isLower c) || c == '_'
     , reserved =
