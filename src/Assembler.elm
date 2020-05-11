@@ -1,8 +1,9 @@
-module Assembler exposing (main, assembleInstruction, assembleProgram, parseProgram, instructionToString)
+module Assembler exposing (main, assembleInstruction, assembleProgram, parseProgram, emitProgram, instructionToString)
 
 import Html exposing (div, p, pre, text)
 import AsmParser exposing (parse, showDeadEnds, Instruction(..), Destinations, Jump)
 import AsmEmitter exposing (emit)
+import Binary
 
 
 testAdd =
@@ -100,8 +101,59 @@ M=D
 
 
 
+testFillScreen =
+  """@8192
+D=A
+@sizeE
+M=D
+
+(LOOP)
+  @KBD
+  A=M
+  D=A
+  @i
+  M=0
+  @FILL
+  D;JNE
+  (CLEAR)
+    @i
+    D=M
+    @size
+    D=D-M
+    @LOOP
+    D;JGE
+    @i
+    D=M
+    @SCREEN
+    A=D+A
+    M=0
+    @i
+    M=M+1
+    @CLEAR
+    0;JMP
+  (FILL)
+    @i
+    D=M
+    @size
+    D=D-M
+    @LOOP
+    D;JGE
+    @i
+    D=M
+    @SCREEN
+    A=D+A
+    M=-1
+    @i
+    M=M+1
+    @FILL
+    0;JMP
+  @LOOP
+  0;JMP
+  """
+
+
 source =
-  testMult
+  testFillScreen
 
 
 assembleInstruction : Int -> String -> Result String String
@@ -127,6 +179,16 @@ parseProgram program =
     
     Ok ast ->
       Ok ast
+
+
+emitProgram : List Instruction -> List Int
+emitProgram instructions =
+  let
+    strToInt =
+      Maybe.withDefault 0 << String.toInt
+  in
+  List.map (Binary.toDecimal << Binary.fromIntegers << List.map strToInt << String.split "") <|
+    String.split "\n" <| AsmEmitter.emit instructions
 
 
 instructionToString : Instruction -> String
