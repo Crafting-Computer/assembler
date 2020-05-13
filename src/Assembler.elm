@@ -186,8 +186,15 @@ emitProgram instructions =
   let
     strToInt =
       Maybe.withDefault 0 << String.toInt
+    convertTo2sComplement number =
+      if number >= 2 ^ 31 then -- negative binary
+        number - 2 ^ 32
+      else -- positive or zero
+        number
   in
-  List.map (Binary.toDecimal << Binary.fromIntegers << List.map strToInt << String.split "") <|
+  List.map ( convertTo2sComplement <<
+    Binary.toDecimal << Binary.fromIntegers <<
+    List.map strToInt << String.split "") <|
     String.split "\n" <| AsmEmitter.emit instructions
 
 
