@@ -682,7 +682,7 @@ showProblemLocation customLineNumber row col src =
 
 makeUnderline : String -> Int -> Int -> String
 makeUnderline row minCol maxCol =
-  String.toList row
+  String.toList (row ++ " ")
     |> List.indexedMap (\i _ -> toUnderlineChar minCol maxCol i)
     |> String.fromList
 
