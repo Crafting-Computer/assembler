@@ -106,6 +106,8 @@ predefinedSymbolTable =
     , ("SP", 0)
     , ("LCL", 1)
     , ("ARG", 2)
+    , ("THIS", 3)
+    , ("THAT", 4)
     ]
 
 
