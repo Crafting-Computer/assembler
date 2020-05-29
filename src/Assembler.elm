@@ -152,8 +152,73 @@ M=D
   """
 
 
+testVariableNameStartingWithDollarSign =
+  """@111
+D=A
+@SP
+AM=M+1
+A=A-1
+M=D
+@333
+D=A
+@SP
+AM=M+1
+A=A-1
+M=D
+@888
+D=A
+@SP
+AM=M+1
+A=A-1
+M=D
+@SP
+AM=M-1
+D=M
+@$basic_test_8
+M=D
+@SP
+AM=M-1
+D=M
+@$basic_test_3
+M=D
+@SP
+AM=M-1
+D=M
+@$basic_test_1
+M=D
+@$basic_test_3
+D=M
+@SP
+AM=M+1
+A=A-1
+M=D
+@$basic_test_1
+D=M
+@SP
+AM=M+1
+A=A-1
+M=D
+@SP
+AM=M-1
+D=M
+A=A-1
+M=M-D
+@$basic_test_8
+D=M
+@SP
+AM=M+1
+A=A-1
+M=D
+@SP
+AM=M-1
+D=M
+A=A-1
+M=D+M
+  """
+
+
 source =
-  testFillScreen
+  testVariableNameStartingWithDollarSign
 
 
 assembleInstruction : Int -> String -> Result String String

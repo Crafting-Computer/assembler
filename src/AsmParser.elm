@@ -471,7 +471,7 @@ variableName =
     { expecting =
       ExpectingVariableName
     , start =
-      Char.isLower
+      \c -> Char.isLower c || c == '$'
     , inner =
       \c -> Char.isAlphaNum c && (not <| Char.isUpper c) || c == '_'
     , reserved =
@@ -722,5 +722,15 @@ isVariableName name =
     Nothing ->
       False
     
-    Just (firstChar, _) ->
+    Just (firstChar, restChars) ->
       Char.isLower firstChar
+      || ( if firstChar == '$' then
+        case String.uncons restChars of
+          Nothing ->
+            False
+          
+          Just (secondChar, _) ->
+            Char.isLower secondChar
+        else
+          False
+      )
