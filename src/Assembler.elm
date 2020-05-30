@@ -1,7 +1,7 @@
-module Assembler exposing (main, assembleInstruction, assembleProgram, parseProgram, emitProgram, instructionToString)
+module Assembler exposing (main, assembleInstruction, assembleProgram, parseProgram, parseProgramKeepLabels, emitProgram, instructionToString)
 
 import Html exposing (div, p, pre, text)
-import AsmParser exposing (parse, showDeadEnds, Instruction(..), Destinations, Jump)
+import AsmParser exposing (parse, parseKeepLabels, showDeadEnds, ParserInstruction(..), ParserAInstructionArg(..), Instruction(..), Destinations, Jump)
 import AsmEmitter exposing (emit)
 import Binary
 
@@ -246,6 +246,18 @@ parseProgram program =
       Ok ast
 
 
+parseProgramKeepLabels : String -> List String
+parseProgramKeepLabels program =
+  case parseKeepLabels program of
+    Err _ ->
+      []
+    
+    Ok ast ->
+      List.map
+        parserInstructionToString
+        ast
+
+
 emitProgram : List Instruction -> List Int
 emitProgram instructions =
   let
@@ -261,6 +273,24 @@ emitProgram instructions =
     Binary.toDecimal << Binary.fromIntegers <<
     List.map strToInt << String.split "") <|
     String.split "\n" <| AsmEmitter.emit instructions
+
+
+parserInstructionToString : ParserInstruction -> String
+parserInstructionToString instruction =
+  case instruction of
+    ParserAInstruction arg ->
+      case arg of
+        ParserAInstructionLabel name ->
+          "@" ++ name.value
+        
+        ParserAInstructionNumber number ->
+          "@" ++ String.fromInt number
+        
+    ParserCInstruction record ->
+      instructionToString <| CInstruction record
+
+    ParserLabelInstruction label _ ->
+      "(" ++ label.value ++ ")"
 
 
 instructionToString : Instruction -> String

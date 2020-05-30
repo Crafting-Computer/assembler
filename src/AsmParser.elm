@@ -1,4 +1,4 @@
-module AsmParser exposing (parse, showDeadEnds, Instruction(..), Destinations, Jump)
+module AsmParser exposing (parse, parseKeepLabels, showDeadEnds, ParserInstruction(..), ParserAInstructionArg(..), Instruction(..), Destinations, Jump)
 
 
 import Parser.Advanced exposing (..)
@@ -205,6 +205,17 @@ parse src =
           )
           undefinedSymbols
   )
+
+
+parseKeepLabels : String -> Result (List (DeadEnd Context Problem)) (List ParserInstruction)
+parseKeepLabels src =
+  run
+    ( succeed
+      Tuple.first
+      |= instructions
+      |. end ExpectingEOF
+    )
+    src
 
 
 instructions : AsmParser (List ParserInstruction, SymbolTable)
