@@ -471,9 +471,9 @@ variableName =
     { expecting =
       ExpectingVariableName
     , start =
-      \c -> Char.isLower c || c == '$'
+      Char.isLower
     , inner =
-      \c -> Char.isAlphaNum c && (not <| Char.isUpper c) || c == '_'
+      \c -> Char.isAlphaNum c || c == '_' || c == '.'
     , reserved =
       Set.empty
     }
@@ -486,9 +486,9 @@ declaredLabel =
     { expecting =
       ExpectingCustomLabel
     , start =
-      Char.isAlpha
+      Char.isUpper
     , inner =
-      \c -> Char.isAlphaNum c && (not <| Char.isLower c) || c == '_'
+      \c -> Char.isAlphaNum c || c == '_' || c == '.'
     , reserved =
       predefinedLabels
     }
@@ -503,7 +503,7 @@ usedLabel =
     , start =
       Char.isUpper
     , inner =
-      \c -> Char.isAlphaNum c && (not <| Char.isLower c) || c == '_'
+      \c -> Char.isAlphaNum c || c == '_' || c == '.'
     , reserved =
       Set.empty
     }
@@ -722,15 +722,6 @@ isVariableName name =
     Nothing ->
       False
     
-    Just (firstChar, restChars) ->
+    Just (firstChar, _) ->
       Char.isLower firstChar
-      || ( if firstChar == '$' then
-        case String.uncons restChars of
-          Nothing ->
-            False
-          
-          Just (secondChar, _) ->
-            Char.isLower secondChar
-        else
-          False
-      )
+
